@@ -3,12 +3,25 @@ import connectDB from '@/lib/db';
 import Menu from '@/models/MenuModel';
 import Order from '@/models/OrderModel';
 
+// Hitung awal hari WIB (UTC+7): ambil waktu sekarang, kurangi offset 7 jam,
+// lalu snap ke midnight UTC — hasilnya = 00:00:00 WIB dalam UTC
+function startOfTodayWIB() {
+  const now = new Date();
+  const wibOffset = 7 * 60 * 60 * 1000;
+  const nowWIB = new Date(now.getTime() + wibOffset);
+  // Ambil tanggal WIB
+  const y = nowWIB.getUTCFullYear();
+  const m = nowWIB.getUTCMonth();
+  const d = nowWIB.getUTCDate();
+  // Buat midnight WIB = UTC jam 17:00 hari sebelumnya
+  return new Date(Date.UTC(y, m, d, 0, 0, 0, 0) - wibOffset);
+}
+
 export async function GET() {
   await connectDB();
   try {
     const menuStatus = await Menu.find().sort({ _id: 1 });
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const startOfDay = startOfTodayWIB();
 
     const totalOrdersToday = await Order.countDocuments({ timestamp: { $gte: startOfDay } });
 
