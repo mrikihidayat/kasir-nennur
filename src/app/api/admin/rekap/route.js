@@ -20,22 +20,26 @@ function startOfTodayWIB() {
 export async function GET() {
   await connectDB();
   try {
-    const menuStatus = await Menu.find().sort({ _id: 1 });
+    const menuStatusPromise = Menu.find().sort({ _id: 1 });
     const startOfDay = startOfTodayWIB();
 
-    const totalOrdersToday = await Order.countDocuments({ timestamp: { $gte: startOfDay } });
+    const totalOrdersTodayPromise = Order.countDocuments({ timestamp: { $gte: startOfDay } });
 
-    const omzetResult = await Order.aggregate([
+    const omzetResultPromise = Order.aggregate([
       { $match: { timestamp: { $gte: startOfDay } } },
       { $group: { _id: null, totalOmzet: { $sum: '$totalHarga' } } },
     ]);
-    const omzetToday = omzetResult.length > 0 ? omzetResult[0].totalOmzet : 0;
 
-    const orderedQuantities = await Order.aggregate([
+    const orderedQuantitiesPromise = Order.aggregate([
       { $match: { timestamp: { $gte: startOfDay }, status: 'Pending' } },
       { $unwind: '$items' },
       { $group: { _id: '$items.menuId', totalOrdered: { $sum: '$items.quantity' } } },
     ]);
+
+    const [menuStatus, totalOrdersToday, omzetResult, orderedQuantities] = await Promise.all([
+      menuStatusPromise, totalOrdersTodayPromise, omzetResultPromise, orderedQuantitiesPromise,
+    ]);
+    const omzetToday = omzetResult.length > 0 ? omzetResult[0].totalOmzet : 0;
 
     const menuStatusWithSales = menuStatus.map((menu) => {
       const orderedData = orderedQuantities.find((s) => s._id.equals(menu._id));

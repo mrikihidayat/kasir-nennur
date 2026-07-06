@@ -36,12 +36,16 @@ export const getAllPendingOrdersWithReceipt = async () => {
 };
 
 export const createNewOrder = async (customerName, items, isDeliveryOrder = false) => {
+  const menuIds = items.map((i) => i.menuId);
+  const menus = await Menu.find({ _id: { $in: menuIds } });
+  const menuMap = new Map(menus.map((m) => [m._id.toString(), m]));
+
   let totalHarga = 0;
   const menuItems = [];
   const itemUpdates = [];
 
   for (const item of items) {
-    const menu = await Menu.findById(item.menuId);
+    const menu = menuMap.get(item.menuId.toString());
     if (!menu) throw new Error(`Menu dengan ID ${item.menuId} tidak ditemukan.`);
     if (!menu.isAvailable) throw new Error(`Menu "${menu.nama}" sedang tidak tersedia hari ini.`);
     if (menu.stok === 0 && item.quantity > 0) throw new Error(`Stok "${menu.nama}" sudah habis.`);
@@ -90,8 +94,12 @@ export const updateExistingOrder = async (orderId, customerName, newItems, isDel
   const menuItems = [];
   const stockDeductionUpdates = [];
 
+  const menuIds = newItems.map((i) => i.menuId);
+  const menus = await Menu.find({ _id: { $in: menuIds } });
+  const menuMap = new Map(menus.map((m) => [m._id.toString(), m]));
+
   for (const item of newItems) {
-    const menu = await Menu.findById(item.menuId);
+    const menu = menuMap.get(item.menuId.toString());
     if (!menu) throw new Error(`Menu "${item.menuId}" tidak ditemukan.`);
     if (!menu.isAvailable) throw new Error(`Menu "${menu.nama}" tidak tersedia.`);
     if (menu.stok === 0 && item.quantity > 0) throw new Error(`Stok "${menu.nama}" habis.`);

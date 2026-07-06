@@ -23,7 +23,7 @@ const OrderForm = ({ allMenus, onOrderProcessed, formatRupiah, editingOrderId, s
     setEditingOrderId(null);
     setIsLoadingEdit(false);
     setSearchTerm('');
-    nameInputRef.current?.focus();
+    nameInputRef.current?.focus({ preventScroll: true });
   }, [setEditingOrderId]);
 
   useEffect(() => {

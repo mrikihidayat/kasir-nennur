@@ -19,6 +19,14 @@ export const deleteMenuApi = (id) => apiFetch(`/menu/${id}`, { method: 'DELETE' 
 export const getPendingNotesByMenuIdApi = (menuId) => apiFetch(`/menu/${menuId}/pending-notes`);
 export const importMenuFromJson = (menus) => apiFetch('/import-menu', { method: 'POST', body: JSON.stringify(menus) });
 
+// --- Menu Bank ---
+export const getAllMenuBank = () => apiFetch('/menu-bank');
+export const createMenuBank = (data) => apiFetch('/menu-bank', { method: 'POST', body: JSON.stringify(data) });
+export const updateMenuBank = (id, data) => apiFetch(`/menu-bank/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const deleteMenuBank = (id) => apiFetch(`/menu-bank/${id}`, { method: 'DELETE' });
+export const activateMenuBankToDaily = (menuBankIds, resetFirst = false) =>
+  apiFetch('/menu-bank/activate-to-daily', { method: 'POST', body: JSON.stringify({ menuBankIds, resetFirst }) });
+
 // --- Orders ---
 export const getOrdersList = () => apiFetch('/orders');
 export const getOrderDetail = (id) => apiFetch(`/order/${id}`);

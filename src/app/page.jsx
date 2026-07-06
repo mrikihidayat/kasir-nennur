@@ -7,7 +7,8 @@ import OrderForm from '@/components/OrderForm';
 import OrderList from '@/components/OrderList';
 import LaporanPDF from '@/components/LaporanPDF';
 import Swal from 'sweetalert2';
-import { Printer, Wifi, WifiOff, ClipboardList, MessageSquare } from 'lucide-react';
+import Link from 'next/link';
+import { Printer, Wifi, WifiOff, ClipboardList, MessageSquare, BookOpen } from 'lucide-react';
 
 const formatRupiah = (n) =>
   new Intl.NumberFormat('id-ID').format(n);
@@ -108,6 +109,12 @@ export default function AdminDashboard() {
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4">
         <h1 className="text-3xl font-extrabold text-gray-800">Dashboard Admin Kasir</h1>
         <div className="flex items-center gap-3 mt-3 md:mt-0">
+          <Link
+            href="/bank-menu"
+            className="flex items-center gap-1.5 py-2 px-4 rounded-lg text-sm font-semibold bg-amber-100 text-amber-700 hover:bg-amber-200 transition"
+          >
+            <BookOpen size={15} /> Bank Menu
+          </Link>
           <span className={`flex items-center gap-1.5 text-sm font-medium ${printerName ? 'text-green-600' : 'text-red-500'}`}>
             {printerName ? <Wifi size={15} /> : <WifiOff size={15} />}
             {printerName || 'Printer Terputus'}

@@ -19,7 +19,7 @@ function LaporanPDF() {
       const { jsPDF } = await import('jspdf');
       const { default: autoTable } = await import('jspdf-autotable');
       const data = await getLaporanPenjualan(today, today);
-      const { orders, grandTotal, totalTransaksi } = data;
+      const { orders, grandTotal, totalTransaksi, menuRecap } = data;
 
       if (!orders?.length) {
         Swal.fire({ icon: 'info', title: 'Tidak Ada Data', text: 'Belum ada pesanan hari ini.' });
@@ -28,18 +28,61 @@ function LaporanPDF() {
       }
 
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-      doc.text('LAPORAN PENJUALAN', 105, 15, { align: 'center' });
-      doc.setFontSize(11); doc.setFont('helvetica', 'normal');
-      doc.text('Warung Ibu Eni', 105, 22, { align: 'center' });
-      doc.setFontSize(9);
-      doc.text(`Periode: ${shortDate(today)}`, 105, 28, { align: 'center' });
-      doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 105, 33, { align: 'center' });
-      doc.setDrawColor(180,180,180); doc.line(10, 36, 200, 36);
+
+      // Palet hitam-putih saja (hemat tinta)
+      const BLACK = [0, 0, 0];
+      const GRAY_LINE = [120, 120, 120];
+      const GRAY_TEXT = [90, 90, 90];
+      const LIGHT_GRID = [210, 210, 210];
+
+      // --- Header (ringkas, tanpa warna) ---
+      doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLACK);
+      doc.text('LAPORAN PENJUALAN', 105, 14, { align: 'center' });
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(...GRAY_TEXT);
+      doc.text('Warung Ibu Eni', 105, 19, { align: 'center' });
+      doc.setFontSize(8);
+      doc.text(`Periode: ${shortDate(today)}  |  Dicetak: ${new Date().toLocaleString('id-ID')}`, 105, 24, { align: 'center' });
+      doc.setDrawColor(...GRAY_LINE);
+      doc.line(10, 27, 200, 27);
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLACK);
+      doc.text(`Total Transaksi: ${totalTransaksi}`, 14, 32);
+      doc.text(`Grand Total: ${fmt(grandTotal)}`, 130, 32);
+      doc.line(10, 35, 200, 35);
+
+      let cursorY = 39;
+
+      // --- Tabel 1: Rekap Per Menu (terjual & sisa stok) ---
+      if (menuRecap?.length) {
+        doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+        doc.text('REKAP PER MENU', 14, cursorY);
+        cursorY += 3;
+
+        autoTable(doc, {
+          startY: cursorY,
+          head: [['Menu', 'Terjual', 'Omzet', 'Sisa Stok']],
+          body: menuRecap.map((m) => [
+            m.menuName,
+            String(m.totalQty),
+            fmt(m.totalOmzet),
+            m.sisaStok === null ? 'Tanpa Batas' : (m.isAvailable ? String(m.sisaStok) : 'Non-aktif'),
+          ]),
+          styles: { fontSize: 7.5, cellPadding: 1.2, textColor: BLACK, lineColor: LIGHT_GRID, lineWidth: 0.1 },
+          headStyles: { fillColor: false, textColor: BLACK, fontStyle: 'bold', halign: 'center', lineColor: BLACK, lineWidth: 0.2 },
+          columnStyles: {
+            0: { cellWidth: 75 }, 1: { cellWidth: 25, halign: 'center' },
+            2: { cellWidth: 45, halign: 'right' }, 3: { cellWidth: 45, halign: 'center' },
+          },
+          theme: 'grid',
+          margin: { left: 10, right: 10 },
+        });
+
+        cursorY = doc.lastAutoTable.finalY + 6;
+      }
+
+      // --- Tabel 2: Detail Transaksi ---
       doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-      doc.text(`Total Transaksi : ${totalTransaksi}`, 14, 42);
-      doc.text(`Grand Total     : ${fmt(grandTotal)}`, 14, 48);
-      doc.line(10, 51, 200, 51);
+      doc.text('DETAIL TRANSAKSI', 14, cursorY);
+      cursorY += 3;
 
       const tableBody = [];
       orders.forEach((order, idx) => {
@@ -48,9 +91,8 @@ function LaporanPDF() {
             itemIdx === 0 ? String(idx + 1) : '',
             itemIdx === 0 ? order.customerName : '',
             itemIdx === 0 ? fmtDate(order.timestamp) : '',
-            item.menuName + (item.notes ? `\n(${item.notes})` : ''),
+            item.menuName + (item.notes ? ` (${item.notes})` : ''),
             String(item.quantity),
-            fmt(item.menuPrice),
             fmt(item.subtotal),
             itemIdx === 0 ? fmt(order.totalHarga) : '',
           ]);
@@ -58,28 +100,28 @@ function LaporanPDF() {
       });
 
       autoTable(doc, {
-        startY: 55,
-        head: [['No','Nama Pembeli','Waktu','Menu','Qty','Harga Satuan','Subtotal','Total Pesanan']],
+        startY: cursorY,
+        head: [['No','Pembeli','Waktu','Menu','Qty','Subtotal','Total']],
         body: tableBody,
-        styles: { fontSize: 7.5, cellPadding: 2, overflow: 'linebreak', valign: 'top', textColor: [50,50,50] },
-        headStyles: { fillColor: [41,128,185], textColor: 255, fontStyle: 'bold', halign: 'center' },
+        styles: { fontSize: 7, cellPadding: 1.2, overflow: 'linebreak', valign: 'top', textColor: BLACK, lineColor: LIGHT_GRID, lineWidth: 0.1 },
+        headStyles: { fillColor: false, textColor: BLACK, fontStyle: 'bold', halign: 'center', lineColor: BLACK, lineWidth: 0.2 },
         columnStyles: {
-          0: { cellWidth: 8, halign: 'center' }, 1: { cellWidth: 32 }, 2: { cellWidth: 28 },
-          3: { cellWidth: 45 }, 4: { cellWidth: 8, halign: 'center' },
-          5: { cellWidth: 27, halign: 'right' }, 6: { cellWidth: 24, halign: 'right' }, 7: { cellWidth: 27, halign: 'right' },
+          0: { cellWidth: 7, halign: 'center' }, 1: { cellWidth: 28 }, 2: { cellWidth: 24 },
+          3: { cellWidth: 55 }, 4: { cellWidth: 8, halign: 'center' },
+          5: { cellWidth: 24, halign: 'right' }, 6: { cellWidth: 24, halign: 'right' },
         },
-        alternateRowStyles: { fillColor: [245,249,255] },
-        foot: [['','','','','','',
+        theme: 'grid',
+        foot: [['','','','','',
           { content: 'GRAND TOTAL', styles: { fontStyle: 'bold', halign: 'right' } },
-          { content: fmt(grandTotal), styles: { fontStyle: 'bold', halign: 'right', textColor: [41,128,185] } },
+          { content: fmt(grandTotal), styles: { fontStyle: 'bold', halign: 'right' } },
         ]],
-        footStyles: { fillColor: [236,240,241], fontSize: 8.5 },
+        footStyles: { fillColor: false, textColor: BLACK, fontSize: 8, lineColor: BLACK, lineWidth: 0.2 },
         margin: { left: 10, right: 10 },
       });
 
       const pageCount = doc.internal.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i); doc.setFontSize(7); doc.setTextColor(150);
+        doc.setPage(i); doc.setFontSize(7); doc.setTextColor(...GRAY_TEXT);
         doc.text(`Halaman ${i} dari ${pageCount}  |  Laporan Penjualan Warung Ibu Eni`, 105, doc.internal.pageSize.getHeight() - 5, { align: 'center' });
       }
 

@@ -1,11 +1,11 @@
 'use client';
-import { useState, useMemo } from 'react';
-import { updateMenu, toggleMenu, deleteMenuApi, getPendingNotesByMenuIdApi, importMenuFromJson } from '@/services/api';
+import { useState, useMemo, useEffect } from 'react';
+import { updateMenu, toggleMenu, deleteMenuApi, getPendingNotesByMenuIdApi, importMenuFromJson, getAllMenuBank } from '@/services/api';
 import Modal from './Modal';
 import Swal from 'sweetalert2';
 import {
   Search, PlusCircle, Edit2, ToggleLeft, ToggleRight, Trash2,
-  Users, Upload, ChevronDown, ChevronUp, ShoppingBag, AlertTriangle
+  Users, Upload, ChevronDown, ChevronUp, ShoppingBag, AlertTriangle, BookOpen
 } from 'lucide-react';
 
 // Sub-komponen: Siapa yang pesan menu ini
@@ -113,6 +113,32 @@ const MenuStatus = ({ recapData, loadDataCallback, formatRupiah }) => {
   const [selectedOrderers, setSelectedOrderers] = useState(null);
   const [selectedMenuName, setSelectedMenuName] = useState('');
 
+  // Rekomendasi dari Bank Menu saat mengetik nama menu baru
+  const [menuBankList, setMenuBankList] = useState([]);
+  const [showBankSuggestions, setShowBankSuggestions] = useState(false);
+
+  useEffect(() => {
+    getAllMenuBank().then(setMenuBankList).catch(() => {});
+  }, []);
+
+  const namesAlreadyDaily = useMemo(
+    () => new Set((recapData?.menuStatus || []).map((m) => m.nama.toLowerCase())),
+    [recapData]
+  );
+
+  const bankSuggestions = useMemo(() => {
+    const q = form.nama.trim().toLowerCase();
+    if (!q || form.id) return [];
+    return menuBankList
+      .filter((m) => m.nama.toLowerCase().includes(q) && !namesAlreadyDaily.has(m.nama.toLowerCase()))
+      .slice(0, 6);
+  }, [form.nama, form.id, menuBankList, namesAlreadyDaily]);
+
+  const handlePickBankSuggestion = (menu) => {
+    setForm((p) => ({ ...p, nama: menu.nama, harga: menu.harga.toString() }));
+    setShowBankSuggestions(false);
+  };
+
   const filteredMenuStatus = useMemo(() => {
     if (!recapData?.menuStatus) return [];
     return recapData.menuStatus.filter((m) =>
@@ -120,7 +146,10 @@ const MenuStatus = ({ recapData, loadDataCallback, formatRupiah }) => {
     );
   }, [recapData, searchTerm]);
 
-  const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+    if (e.target.name === 'nama') setShowBankSuggestions(true);
+  };
 
   const handleEdit = (menu) => {
     setForm({ id: menu._id, nama: menu.nama, harga: menu.harga.toString(), stok: menu.stok.toString() });
@@ -267,12 +296,37 @@ const MenuStatus = ({ recapData, loadDataCallback, formatRupiah }) => {
       {/* Form Tambah/Edit */}
       {isFormOpen && (
         <form onSubmit={handleSubmit} className="space-y-2.5 mb-5 p-4 bg-gray-50 rounded-xl border">
-          <input
-            type="text" name="nama" value={form.nama} onChange={handleChange}
-            placeholder="Nama Menu (cth: Ayam Balado)" required
-            disabled={!!form.id}
-            className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-400 focus:border-transparent disabled:bg-gray-100"
-          />
+          <div className="relative">
+            <input
+              type="text" name="nama" value={form.nama}
+              onChange={(e) => { handleChange(e); setShowBankSuggestions(true); }}
+              onFocus={() => setShowBankSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowBankSuggestions(false), 150)}
+              placeholder="Nama Menu (cth: Ayam Balado)" required
+              disabled={!!form.id}
+              autoComplete="off"
+              className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-400 focus:border-transparent disabled:bg-gray-100"
+            />
+            {showBankSuggestions && bankSuggestions.length > 0 && (
+              <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-white border border-amber-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
+                <p className="text-xs text-amber-600 font-semibold px-3 pt-2 pb-1 flex items-center gap-1">
+                  <BookOpen size={11} /> Rekomendasi dari Bank Menu
+                </p>
+                {bankSuggestions.map((menu) => (
+                  <button
+                    type="button"
+                    key={menu._id}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handlePickBankSuggestion(menu)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 hover:bg-amber-50 text-left transition"
+                  >
+                    <span className="text-sm text-gray-800 truncate">{menu.nama}</span>
+                    <span className="text-xs text-gray-500 font-medium shrink-0">Rp {formatRupiah(menu.harga)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <input
             type="number" name="harga" value={form.harga} onChange={handleChange}
             placeholder="Harga (Rp)" required
