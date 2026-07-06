@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   getAllMenuBank,
+  getAllMenus,
   createMenuBank,
   updateMenuBank,
   deleteMenuBank,
@@ -11,44 +12,187 @@ import Swal from 'sweetalert2';
 import Link from 'next/link';
 import {
   ArrowLeft, Plus, Edit2, Trash2, Search, ImagePlus, CheckSquare,
-  Square, Zap, X, Save, Camera, BookOpen, LayoutGrid, List
+  Square, Zap, X, Save, Camera, BookOpen, LayoutGrid, List,
+  Download, Image as ImageIcon, CalendarCheck,
 } from 'lucide-react';
 
 const formatRupiah = (n) => new Intl.NumberFormat('id-ID').format(n);
 
+// ─── Grid Promosi (canvas) ───────────────────────────────────────────────────
+// Bikin gambar grid promosi dari bank menu yang punya foto, max 6 menu/gambar.
+// Kalau lebih dari 6 menu, otomatis dipecah jadi beberapa gambar unduhan.
+const GRID_COLS = 3;
+const GRID_ROWS = 2;
+const ITEMS_PER_GRID = GRID_COLS * GRID_ROWS; // 6
+const CELL_SIZE = 320;
+const CELL_GAP = 16;
+const GRID_PADDING = 24;
+const CAPTION_HEIGHT = 74;
+
+const loadImageEl = (src) =>
+  new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Gagal load foto'));
+    img.src = src;
+  });
+
+const roundRectPath = (ctx, x, y, w, h, r) => {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+};
+
+const truncateCanvasText = (ctx, text, maxWidth) => {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while (t.length > 0 && ctx.measureText(t + '…').width > maxWidth) t = t.slice(0, -1);
+  return t + '…';
+};
+
+const buildGridCanvas = async (menusChunk) => {
+  const cellTotalH = CELL_SIZE + CAPTION_HEIGHT;
+  const width = GRID_PADDING * 2 + GRID_COLS * CELL_SIZE + (GRID_COLS - 1) * CELL_GAP;
+  const height = GRID_PADDING * 2 + GRID_ROWS * cellTotalH + (GRID_ROWS - 1) * CELL_GAP;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff7ed';
+  ctx.fillRect(0, 0, width, height);
+
+  for (let i = 0; i < menusChunk.length; i++) {
+    const menu = menusChunk[i];
+    const col = i % GRID_COLS;
+    const row = Math.floor(i / GRID_COLS);
+    const x = GRID_PADDING + col * (CELL_SIZE + CELL_GAP);
+    const y = GRID_PADDING + row * (cellTotalH + CELL_GAP);
+
+    try {
+      const img = await loadImageEl(menu.foto);
+      const s = Math.min(img.width, img.height);
+      const sx = (img.width - s) / 2;
+      const sy = (img.height - s) / 2;
+      ctx.save();
+      roundRectPath(ctx, x, y, CELL_SIZE, CELL_SIZE, 16);
+      ctx.clip();
+      ctx.drawImage(img, sx, sy, s, s, x, y, CELL_SIZE, CELL_SIZE);
+      ctx.restore();
+    } catch {
+      ctx.fillStyle = '#fde68a';
+      roundRectPath(ctx, x, y, CELL_SIZE, CELL_SIZE, 16);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#7c2d12';
+    roundRectPath(ctx, x, y + CELL_SIZE + 8, CELL_SIZE, CAPTION_HEIGHT - 8, 12);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(truncateCanvasText(ctx, menu.nama, CELL_SIZE - 24), x + CELL_SIZE / 2, y + CELL_SIZE + 36);
+
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#fed7aa';
+    ctx.fillText(`Rp ${formatRupiah(menu.harga)}`, x + CELL_SIZE / 2, y + CELL_SIZE + 60);
+  }
+
+  return canvas;
+};
+
+// Resize + kompres foto ke JPEG lewat canvas, apapun ukuran/format aslinya
+// (HEIC dari HP kadang gak bisa dibaca <img>, tapi kebanyakan browser modern
+// sudah auto-convert saat file dipilih lewat <input type="file">).
+const compressImage = (file, maxDim = 1024, quality = 0.75) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxDim) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else if (height >= width && height > maxDim) {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('Gagal membaca gambar.'));
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => reject(new Error('Gagal membaca file.'));
+    reader.readAsDataURL(file);
+  });
+
+const dataUrlSizeBytes = (dataUrl) => Math.ceil((dataUrl.length * 3) / 4);
+
 // ─── Photo Uploader ───────────────────────────────────────────────────────────
 const PhotoUploader = ({ value, onChange }) => {
   const inputRef = useRef(null);
+  const [compressing, setCompressing] = useState(false);
 
-  const handleFile = (e) => {
+  const handleFile = async (e) => {
     const file = e.target.files[0];
+    e.target.value = ''; // biar bisa pilih file yang sama lagi kalau mau ulang
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      Swal.fire({ icon: 'warning', title: 'Foto terlalu besar', text: 'Maksimal ukuran foto 2MB.' });
+
+    // Batas file asli dilonggarkan (foto HP jaman sekarang gampang 5-10MB),
+    // toh nanti dikompres otomatis sebelum disimpan.
+    if (file.size > 15 * 1024 * 1024) {
+      Swal.fire({ icon: 'warning', title: 'Foto terlalu besar', text: 'Maksimal ukuran foto asli 15MB.' });
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (ev) => onChange(ev.target.result);
-    reader.readAsDataURL(file);
+
+    setCompressing(true);
+    try {
+      let result = await compressImage(file, 1024, 0.75);
+      // Kalau masih gede (misal foto sangat detail), kompres ulang lebih agresif
+      if (dataUrlSizeBytes(result) > 700 * 1024) {
+        result = await compressImage(file, 800, 0.6);
+      }
+      onChange(result);
+    } catch (err) {
+      Swal.fire({ icon: 'error', title: 'Gagal memproses foto', text: err.message || 'Coba foto lain.' });
+    } finally {
+      setCompressing(false);
+    }
   };
 
   return (
     <div className="flex flex-col items-center gap-2">
       <div
-        onClick={() => inputRef.current?.click()}
+        onClick={() => !compressing && inputRef.current?.click()}
         className="w-full h-36 rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 hover:bg-amber-100 cursor-pointer flex flex-col items-center justify-center gap-2 transition overflow-hidden relative"
       >
-        {value ? (
+        {compressing ? (
+          <>
+            <div className="h-6 w-6 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+            <span className="text-xs text-amber-500">Mengompres foto...</span>
+          </>
+        ) : value ? (
           <img src={value} alt="preview" className="w-full h-full object-cover rounded-xl" />
         ) : (
           <>
             <Camera size={28} className="text-amber-400" />
             <span className="text-sm text-amber-600 font-medium">Klik untuk upload foto</span>
-            <span className="text-xs text-amber-400">PNG/JPG, max 2MB</span>
+            <span className="text-xs text-amber-400">Foto langsung dari HP juga oke, otomatis dikompres</span>
           </>
         )}
       </div>
-      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" disabled={compressing} />
       {value && (
         <button
           type="button"
@@ -171,7 +315,7 @@ const MenuBankForm = ({ editData, onClose, onSaved }) => {
 };
 
 // ─── Menu Card (Grid View) ────────────────────────────────────────────────────
-const MenuCard = ({ menu, selected, onToggleSelect, onEdit, onDelete }) => (
+const MenuCard = ({ menu, selected, isActiveToday, onToggleSelect, onEdit, onDelete }) => (
   <div
     className={`relative rounded-2xl border-2 overflow-hidden transition cursor-pointer group ${
       selected ? 'border-amber-400 shadow-lg shadow-amber-100' : 'border-gray-200 hover:border-amber-300 hover:shadow-md'
@@ -184,6 +328,13 @@ const MenuCard = ({ menu, selected, onToggleSelect, onEdit, onDelete }) => (
         {selected ? <CheckSquare size={14} /> : <Square size={14} />}
       </div>
     </div>
+
+    {/* Badge aktif hari ini */}
+    {isActiveToday && (
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-green-500/90 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow">
+        <CalendarCheck size={10} /> Hari Ini
+      </div>
+    )}
 
     {/* Photo */}
     <div className="h-32 bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center overflow-hidden">
@@ -222,7 +373,7 @@ const MenuCard = ({ menu, selected, onToggleSelect, onEdit, onDelete }) => (
 );
 
 // ─── Menu Row (List View) ─────────────────────────────────────────────────────
-const MenuRow = ({ menu, selected, onToggleSelect, onEdit, onDelete }) => (
+const MenuRow = ({ menu, selected, isActiveToday, onToggleSelect, onEdit, onDelete }) => (
   <div
     className={`flex items-center gap-3 p-3 rounded-xl border-2 transition cursor-pointer ${
       selected ? 'border-amber-400 bg-amber-50' : 'border-gray-200 hover:border-amber-300 hover:bg-gray-50'
@@ -242,7 +393,14 @@ const MenuRow = ({ menu, selected, onToggleSelect, onEdit, onDelete }) => (
     </div>
 
     <div className="flex-1 min-w-0">
-      <p className="font-semibold text-gray-800 text-sm truncate">{menu.nama}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="font-semibold text-gray-800 text-sm truncate">{menu.nama}</p>
+        {isActiveToday && (
+          <span className="flex items-center gap-0.5 bg-green-100 text-green-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
+            <CalendarCheck size={9} /> Hari Ini
+          </span>
+        )}
+      </div>
       <p className="text-amber-600 font-semibold text-xs">Rp {formatRupiah(menu.harga)}</p>
       {menu.deskripsi && <p className="text-xs text-gray-400 truncate">{menu.deskripsi}</p>}
     </div>
@@ -267,6 +425,7 @@ const MenuRow = ({ menu, selected, onToggleSelect, onEdit, onDelete }) => (
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function BankMenuPage() {
   const [menus, setMenus] = useState([]);
+  const [activeTodayNames, setActiveTodayNames] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -274,12 +433,23 @@ export default function BankMenuPage() {
   const [editData, setEditData] = useState(null);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [activating, setActivating] = useState(false);
+  const [generatingGrid, setGeneratingGrid] = useState(false);
 
   const loadMenus = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getAllMenuBank();
-      setMenus(data);
+      const [bankData, dailyData] = await Promise.all([
+        getAllMenuBank(),
+        getAllMenus().catch(() => []), // kalau gagal, badge "hari ini" cuma gak muncul, gak fatal
+      ]);
+      setMenus(bankData);
+      setActiveTodayNames(
+        new Set(
+          (dailyData || [])
+            .filter((m) => m.isAvailable)
+            .map((m) => m.nama.toLowerCase())
+        )
+      );
     } catch (err) {
       Swal.fire({ icon: 'error', title: 'Gagal muat bank menu', text: err.message });
     } finally {
@@ -337,7 +507,7 @@ export default function BankMenuPage() {
       return;
     }
 
-    const { isConfirmed, value: resetFirst } = await Swal.fire({
+    const { isConfirmed, value } = await Swal.fire({
       title: `Aktifkan ${selectedIds.size} Menu?`,
       html: `
         <p class="text-gray-600 text-sm mb-3">Menu yang dipilih akan ditambahkan ke menu harian aktif.</p>
@@ -351,10 +521,14 @@ export default function BankMenuPage() {
       confirmButtonColor: '#f59e0b',
       confirmButtonText: '⚡ Aktifkan Sekarang',
       cancelButtonText: 'Batal',
-      preConfirm: () => document.getElementById('resetFirst')?.checked || false,
+      // PENTING: preConfirm tidak boleh return `false` mentah — SweetAlert2 akan
+      // menganggapnya validasi gagal dan popup tidak akan tertutup. Makanya
+      // dibungkus jadi object supaya nilainya selalu truthy.
+      preConfirm: () => ({ resetFirst: document.getElementById('resetFirst')?.checked || false }),
     });
 
     if (!isConfirmed) return;
+    const resetFirst = value?.resetFirst || false;
 
     setActivating(true);
     try {
@@ -371,6 +545,57 @@ export default function BankMenuPage() {
       Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
     } finally {
       setActivating(false);
+    }
+  };
+
+  const handleDownloadGridPromo = async () => {
+    // Kalau ada yang dipilih manual, pakai itu. Kalau tidak, pakai menu yang
+    // sedang aktif di menu harian hari ini.
+    const usingSelection = selectedIds.size > 0;
+    const source = usingSelection
+      ? menus.filter((m) => selectedIds.has(m._id))
+      : menus.filter((m) => activeTodayNames.has(m.nama.toLowerCase()));
+
+    const withPhoto = source.filter((m) => m.foto);
+
+    if (withPhoto.length === 0) {
+      Swal.fire({
+        icon: 'info',
+        title: 'Belum ada foto',
+        text: usingSelection
+          ? 'Menu yang dipilih belum ada fotonya.'
+          : 'Belum ada menu aktif hari ini yang punya foto. Pilih menu manual dulu, atau aktifkan menu dari bank ke menu harian.',
+      });
+      return;
+    }
+
+    setGeneratingGrid(true);
+    try {
+      const chunks = [];
+      for (let i = 0; i < withPhoto.length; i += ITEMS_PER_GRID) {
+        chunks.push(withPhoto.slice(i, i + ITEMS_PER_GRID));
+      }
+      for (let i = 0; i < chunks.length; i++) {
+        const canvas = await buildGridCanvas(chunks[i]);
+        const link = document.createElement('a');
+        link.download = chunks.length > 1 ? `promo-menu-${i + 1}.png` : 'promo-menu.png';
+        link.href = canvas.toDataURL('image/png');
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      const skipped = source.length - withPhoto.length;
+      Swal.fire({
+        icon: 'success',
+        title: `${chunks.length} gambar grid diunduh!`,
+        text: skipped > 0 ? `${skipped} menu tanpa foto dilewati.` : undefined,
+        timer: 2200,
+        showConfirmButton: false,
+      });
+    } catch (err) {
+      Swal.fire({ icon: 'error', title: 'Gagal membuat grid', text: err.message });
+    } finally {
+      setGeneratingGrid(false);
     }
   };
 
@@ -400,6 +625,11 @@ export default function BankMenuPage() {
           <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full ml-1">
             {menus.length} menu tersimpan
           </span>
+          {activeTodayNames.size > 0 && (
+            <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 font-semibold px-2 py-0.5 rounded-full">
+              <CalendarCheck size={11} /> {activeTodayNames.size} aktif hari ini
+            </span>
+          )}
         </div>
       </header>
 
@@ -442,7 +672,27 @@ export default function BankMenuPage() {
             >
               <Plus size={15} /> Tambah Menu
             </button>
+
+            {/* Grid Promosi button */}
+            <button
+              onClick={handleDownloadGridPromo}
+              disabled={generatingGrid}
+              className="flex items-center justify-center gap-1.5 bg-pink-500 hover:bg-pink-600 text-white font-semibold px-4 py-2.5 rounded-xl text-sm transition shadow-sm disabled:opacity-60"
+            >
+              {generatingGrid ? (
+                <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <ImageIcon size={15} />
+              )}
+              {generatingGrid ? 'Membuat...' : 'Grid Promosi'}
+            </button>
           </div>
+          <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+            <Download size={11} />
+            {selectedIds.size > 0
+              ? `Bikin gambar grid dari ${selectedIds.size} menu terpilih (max 6/gambar).`
+              : 'Bikin gambar grid dari menu yang aktif hari ini (max 6/gambar). Pilih menu manual untuk kombinasi lain.'}
+          </p>
         </div>
 
         {/* Activation Bar — appears when selection is active */}
@@ -510,6 +760,7 @@ export default function BankMenuPage() {
                 key={menu._id}
                 menu={menu}
                 selected={selectedIds.has(menu._id)}
+                isActiveToday={activeTodayNames.has(menu.nama.toLowerCase())}
                 onToggleSelect={toggleSelect}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
@@ -523,6 +774,7 @@ export default function BankMenuPage() {
                 key={menu._id}
                 menu={menu}
                 selected={selectedIds.has(menu._id)}
+                isActiveToday={activeTodayNames.has(menu.nama.toLowerCase())}
                 onToggleSelect={toggleSelect}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
