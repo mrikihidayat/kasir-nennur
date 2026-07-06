@@ -13,7 +13,7 @@ import Link from 'next/link';
 import {
   ArrowLeft, Plus, Edit2, Trash2, Search, ImagePlus, CheckSquare,
   Square, Zap, X, Save, Camera, BookOpen, LayoutGrid, List,
-  Download, Image as ImageIcon, CalendarCheck,
+  Download, Image as ImageIcon, CalendarCheck, Crop, Check,
 } from 'lucide-react';
 
 const formatRupiah = (n) => new Intl.NumberFormat('id-ID').format(n);
@@ -106,43 +106,209 @@ const buildGridCanvas = async (menusChunk) => {
   return canvas;
 };
 
-// Resize + kompres foto ke JPEG lewat canvas, apapun ukuran/format aslinya
-// (HEIC dari HP kadang gak bisa dibaca <img>, tapi kebanyakan browser modern
-// sudah auto-convert saat file dipilih lewat <input type="file">).
-const compressImage = (file, maxDim = 1024, quality = 0.75) =>
+const dataUrlSizeBytes = (dataUrl) => Math.ceil((dataUrl.length * 3) / 4);
+
+const readFileAsDataUrl = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const img = new Image();
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > height && width > maxDim) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else if (height >= width && height > maxDim) {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = () => reject(new Error('Gagal membaca gambar.'));
-      img.src = ev.target.result;
-    };
+    reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(new Error('Gagal membaca file.'));
     reader.readAsDataURL(file);
   });
 
-const dataUrlSizeBytes = (dataUrl) => Math.ceil((dataUrl.length * 3) / 4);
+// ─── Crop Modal ────────────────────────────────────────────────────────────
+// Crop bebas geser + zoom, hasil akhir selalu persegi (cocok buat thumbnail
+// kartu menu & grid promosi yang sama-sama pakai object-cover 1:1).
+const CROP_VIEWPORT = 300; // ukuran kotak crop di layar (px)
+const CROP_OUTPUT = 900;   // ukuran gambar hasil crop (px)
+
+const clampOffset = (offset, displayed, viewport) => {
+  const max = Math.max(0, (displayed - viewport) / 2);
+  return Math.min(max, Math.max(-max, offset));
+};
+
+const CropModal = ({ src, onCancel, onConfirm }) => {
+  const [img, setImg] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [saving, setSaving] = useState(false);
+  const dragRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    loadImageEl(src)
+      .then((im) => { if (alive) setImg(im); })
+      .catch(() => {
+        Swal.fire({ icon: 'error', title: 'Gagal memuat foto', text: 'Coba pilih foto lain.' });
+        onCancel();
+      });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src]);
+
+  const baseScale = img ? Math.max(CROP_VIEWPORT / img.width, CROP_VIEWPORT / img.height) : 1;
+  const scale = baseScale * zoom;
+  const displayedW = img ? img.width * scale : 0;
+  const displayedH = img ? img.height * scale : 0;
+
+  const reclamp = (nextZoom, prevOffset) => {
+    const nextScale = baseScale * nextZoom;
+    return {
+      x: clampOffset(prevOffset.x, img.width * nextScale, CROP_VIEWPORT),
+      y: clampOffset(prevOffset.y, img.height * nextScale, CROP_VIEWPORT),
+    };
+  };
+
+  const handlePointerDown = (e) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startOffsetX: offset.x, startOffsetY: offset.y };
+  };
+  const handlePointerMove = (e) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    setOffset({
+      x: clampOffset(dragRef.current.startOffsetX + dx, displayedW, CROP_VIEWPORT),
+      y: clampOffset(dragRef.current.startOffsetY + dy, displayedH, CROP_VIEWPORT),
+    });
+  };
+  const handlePointerUp = () => { dragRef.current = null; };
+
+  const handleZoomChange = (e) => {
+    const nextZoom = parseFloat(e.target.value);
+    setZoom(nextZoom);
+    setOffset((prev) => reclamp(nextZoom, prev));
+  };
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.05 : 0.05;
+    setZoom((z) => {
+      const nz = Math.min(3, Math.max(1, +(z + delta).toFixed(2)));
+      setOffset((prev) => reclamp(nz, prev));
+      return nz;
+    });
+  };
+
+  const renderCrop = (quality, outputSize) => {
+    const imgLeft = (CROP_VIEWPORT - displayedW) / 2 + offset.x;
+    const imgTop = (CROP_VIEWPORT - displayedH) / 2 + offset.y;
+    const sx = -imgLeft / scale;
+    const sy = -imgTop / scale;
+    const sSize = CROP_VIEWPORT / scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = outputSize;
+    canvas.height = outputSize;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, outputSize, outputSize);
+    return canvas.toDataURL('image/jpeg', quality);
+  };
+
+  const handleConfirm = () => {
+    if (!img) return;
+    setSaving(true);
+    try {
+      let result = renderCrop(0.8, CROP_OUTPUT);
+      // Kalau masih gede, kompres ulang lebih agresif
+      if (dataUrlSizeBytes(result) > 700 * 1024) {
+        result = renderCrop(0.6, 700);
+      }
+      onConfirm(result);
+    } catch {
+      Swal.fire({ icon: 'error', title: 'Gagal memproses foto', text: 'Coba lagi ya.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold text-gray-800 text-sm flex items-center gap-1.5">
+            <Crop size={16} className="text-amber-500" /> Atur Foto
+          </h3>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition">
+            <X size={18} />
+          </button>
+        </div>
+
+        {!img ? (
+          <div className="h-[300px] flex items-center justify-center text-amber-400 text-sm animate-pulse">
+            Memuat gambar...
+          </div>
+        ) : (
+          <>
+            <div
+              className="relative mx-auto overflow-hidden rounded-xl bg-gray-900 touch-none select-none cursor-grab active:cursor-grabbing"
+              style={{ width: CROP_VIEWPORT, height: CROP_VIEWPORT }}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerUp}
+              onWheel={handleWheel}
+            >
+              <img
+                src={src}
+                alt="Crop preview"
+                draggable={false}
+                style={{
+                  position: 'absolute',
+                  left: (CROP_VIEWPORT - displayedW) / 2 + offset.x,
+                  top: (CROP_VIEWPORT - displayedH) / 2 + offset.y,
+                  width: displayedW,
+                  height: displayedH,
+                  maxWidth: 'none',
+                }}
+              />
+              <div className="absolute inset-0 pointer-events-none ring-1 ring-white/40 rounded-xl" />
+            </div>
+
+            <div className="flex items-center gap-2 mt-3">
+              <span className="text-xs text-gray-400">Zoom</span>
+              <input
+                type="range"
+                min="1"
+                max="3"
+                step="0.01"
+                value={zoom}
+                onChange={handleZoomChange}
+                className="flex-1 accent-amber-500"
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1 text-center">
+              Geser foto buat atur posisi, scroll atau slider buat zoom.
+            </p>
+
+            <div className="flex gap-2 mt-4">
+              <button
+                type="button"
+                onClick={handleConfirm}
+                disabled={saving}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                <Check size={15} /> Pakai Foto Ini
+              </button>
+              <button
+                type="button"
+                onClick={onCancel}
+                className="py-2.5 px-4 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold text-sm transition"
+              >
+                Batal
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // ─── Photo Uploader ───────────────────────────────────────────────────────────
 const PhotoUploader = ({ value, onChange }) => {
   const inputRef = useRef(null);
-  const [compressing, setCompressing] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [cropSrc, setCropSrc] = useState(null); // sumber foto yang lagi dicrop
 
   const handleFile = async (e) => {
     const file = e.target.files[0];
@@ -150,37 +316,35 @@ const PhotoUploader = ({ value, onChange }) => {
     if (!file) return;
 
     // Batas file asli dilonggarkan (foto HP jaman sekarang gampang 5-10MB),
-    // toh nanti dikompres otomatis sebelum disimpan.
+    // toh nanti dicrop & dikompres otomatis sebelum disimpan.
     if (file.size > 15 * 1024 * 1024) {
       Swal.fire({ icon: 'warning', title: 'Foto terlalu besar', text: 'Maksimal ukuran foto asli 15MB.' });
       return;
     }
 
-    setCompressing(true);
+    setReading(true);
     try {
-      let result = await compressImage(file, 1024, 0.75);
-      // Kalau masih gede (misal foto sangat detail), kompres ulang lebih agresif
-      if (dataUrlSizeBytes(result) > 700 * 1024) {
-        result = await compressImage(file, 800, 0.6);
-      }
-      onChange(result);
+      const dataUrl = await readFileAsDataUrl(file);
+      setCropSrc(dataUrl); // buka cropper dulu, belum langsung disimpan
     } catch (err) {
-      Swal.fire({ icon: 'error', title: 'Gagal memproses foto', text: err.message || 'Coba foto lain.' });
+      Swal.fire({ icon: 'error', title: 'Gagal membaca foto', text: err.message || 'Coba foto lain.' });
     } finally {
-      setCompressing(false);
+      setReading(false);
     }
   };
 
   return (
     <div className="flex flex-col items-center gap-2">
       <div
-        onClick={() => !compressing && inputRef.current?.click()}
-        className="w-full h-36 rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 hover:bg-amber-100 cursor-pointer flex flex-col items-center justify-center gap-2 transition overflow-hidden relative"
+        onClick={() => !reading && !value && inputRef.current?.click()}
+        className={`w-full h-36 rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 flex flex-col items-center justify-center gap-2 transition overflow-hidden relative ${
+          value ? '' : 'hover:bg-amber-100 cursor-pointer'
+        }`}
       >
-        {compressing ? (
+        {reading ? (
           <>
             <div className="h-6 w-6 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs text-amber-500">Mengompres foto...</span>
+            <span className="text-xs text-amber-500">Membaca foto...</span>
           </>
         ) : value ? (
           <img src={value} alt="preview" className="w-full h-full object-cover rounded-xl" />
@@ -188,19 +352,45 @@ const PhotoUploader = ({ value, onChange }) => {
           <>
             <Camera size={28} className="text-amber-400" />
             <span className="text-sm text-amber-600 font-medium">Klik untuk upload foto</span>
-            <span className="text-xs text-amber-400">Foto langsung dari HP juga oke, otomatis dikompres</span>
+            <span className="text-xs text-amber-400">Bisa diatur crop-nya sebelum disimpan</span>
           </>
         )}
       </div>
-      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" disabled={compressing} />
+
+      <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" disabled={reading} />
+
       {value && (
-        <button
-          type="button"
-          onClick={() => onChange(null)}
-          className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
-        >
-          <X size={12} /> Hapus foto
-        </button>
+        <div className="flex items-center gap-3 flex-wrap justify-center">
+          <button
+            type="button"
+            onClick={() => setCropSrc(value)}
+            className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1"
+          >
+            <Crop size={12} /> Crop Ulang
+          </button>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="text-xs text-amber-600 hover:text-amber-800 flex items-center gap-1"
+          >
+            <Camera size={12} /> Ganti Foto
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
+          >
+            <X size={12} /> Hapus foto
+          </button>
+        </div>
+      )}
+
+      {cropSrc && (
+        <CropModal
+          src={cropSrc}
+          onCancel={() => setCropSrc(null)}
+          onConfirm={(result) => { onChange(result); setCropSrc(null); }}
+        />
       )}
     </div>
   );
