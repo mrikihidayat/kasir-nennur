@@ -4,14 +4,15 @@ import { deleteOrderApi, confirmOrder, getOrderDetail } from '@/services/api';
 import { printData } from '@/services/bluetooth';
 import Modal from './Modal';
 import Swal from 'sweetalert2';
-import { Search, CheckCircle, Printer, Edit2, Trash2, Truck, Package } from 'lucide-react';
+import { Search, CheckCircle, Printer, Edit2, Trash2, Wallet } from 'lucide-react';
+import { KASIR_LABEL } from '@/lib/kasir';
 
 const OrderDetailContent = ({ order, formatRupiah }) => (
   <div className="space-y-3">
     <h3 className="text-lg font-bold border-b pb-2 flex items-center gap-2 flex-wrap">
       {order.customerName}
-      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${order.isDeliveryOrder ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'}`}>
-        {order.isDeliveryOrder ? '🚚 DELIVERY' : '🏠 AMBIL SENDIRI'}
+      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-800 flex items-center gap-1">
+        <Wallet size={11} /> {KASIR_LABEL[order.kasir] || 'Rumah'}
       </span>
     </h3>
     <ul className="space-y-2 max-h-72 overflow-y-auto">
@@ -119,7 +120,6 @@ const OrderList = ({ orders, loadDataCallback, formatRupiah, printerStatus, setE
   const getCardStyle = (order) => {
     if (order.status === 'Selesai') return 'border-green-300 bg-green-50';
     if (order.status === 'Dibatalkan') return 'border-red-200 opacity-60';
-    if (order.isDeliveryOrder) return 'border-yellow-400 bg-yellow-50';
     return 'border-gray-200 bg-white hover:bg-gray-50';
   };
 
@@ -147,13 +147,14 @@ const OrderList = ({ orders, loadDataCallback, formatRupiah, printerStatus, setE
           >
             <div className="flex items-start justify-between gap-1 mb-1">
               <p className="font-bold text-gray-800 text-sm truncate">{order.customerName || 'Anonim'}</p>
-              {order.isDeliveryOrder && <Truck size={13} className="text-blue-600 shrink-0 mt-0.5" />}
             </div>
             <p className="text-sm font-semibold text-gray-700">Rp {formatRupiah(order.totalHarga)}</p>
             <p className="text-xs text-gray-400">{new Date(order.timestamp).toLocaleTimeString('id-ID')}</p>
             <div className="flex items-center gap-1 mt-1.5 flex-wrap">
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getStatusStyle(order.status)}`}>{order.status}</span>
-              {order.isDeliveryOrder && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-600 text-white font-medium">DO</span>}
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-medium flex items-center gap-0.5">
+                <Wallet size={10} /> {KASIR_LABEL[order.kasir] || 'Rumah'}
+              </span>
             </div>
             <div className="flex flex-wrap gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
               {order.status !== 'Selesai' && (

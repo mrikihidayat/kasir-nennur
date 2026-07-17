@@ -18,7 +18,11 @@ const OrderSchema = new mongoose.Schema({
     enum: ['Pending', 'Selesai', 'Dibatalkan'],
     default: 'Pending',
   },
-  isDeliveryOrder: { type: Boolean, default: false },
+  kasir: {
+    type: String,
+    enum: ['mamah', 'bapa', 'kojengkang', 'kiki', 'rumah'],
+    default: 'rumah',
+  },
 });
 
 export default mongoose.models.Order || mongoose.model('Order', OrderSchema);

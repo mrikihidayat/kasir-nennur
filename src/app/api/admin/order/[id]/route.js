@@ -20,8 +20,8 @@ export async function PUT(request, { params }) {
   await connectDB();
   try {
     const { id } = await params;
-    const { customerName, items, isDeliveryOrder } = await request.json();
-    const { updatedOrder, receiptText } = await updateExistingOrder(id, customerName, items, isDeliveryOrder);
+    const { customerName, items, kasir } = await request.json();
+    const { updatedOrder, receiptText } = await updateExistingOrder(id, customerName, items, kasir);
     return NextResponse.json({ message: 'Pesanan berhasil diubah!', orderId: updatedOrder._id, receipt: receiptText });
   } catch (error) {
     return NextResponse.json({ message: error.message }, { status: 400 });

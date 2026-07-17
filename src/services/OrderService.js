@@ -12,7 +12,6 @@ export const generateReceiptData = (order) => {
   let receipt = `===============================\nSTRUK WARUNG IBU ENI\n`;
   receipt += `Nama: ${order.customerName}\n`;
   receipt += `Waktu: ${orderDate} - ${orderTime}\n`;
-  receipt += `Layanan: ${order.isDeliveryOrder ? 'DELIVERY ORDER' : 'AMBIL SENDIRI'}\n`;
   receipt += `-------------------------------\n`;
 
   for (const item of order.items) {
@@ -35,7 +34,7 @@ export const getAllPendingOrdersWithReceipt = async () => {
   }));
 };
 
-export const createNewOrder = async (customerName, items, isDeliveryOrder = false) => {
+export const createNewOrder = async (customerName, items, kasir = 'rumah') => {
   const menuIds = items.map((i) => i.menuId);
   const menus = await Menu.find({ _id: { $in: menuIds } });
   const menuMap = new Map(menus.map((m) => [m._id.toString(), m]));
@@ -73,14 +72,14 @@ export const createNewOrder = async (customerName, items, isDeliveryOrder = fals
     items: menuItems,
     totalHarga,
     status: 'Pending',
-    isDeliveryOrder,
+    kasir: kasir || 'rumah',
   });
   await newOrder.save();
 
   return { newOrder, receiptText: generateReceiptData(newOrder) };
 };
 
-export const updateExistingOrder = async (orderId, customerName, newItems, isDeliveryOrder) => {
+export const updateExistingOrder = async (orderId, customerName, newItems, kasir) => {
   const oldOrder = await Order.findById(orderId);
   if (!oldOrder) throw new Error('Pesanan tidak ditemukan.');
 
@@ -125,7 +124,7 @@ export const updateExistingOrder = async (orderId, customerName, newItems, isDel
   await Promise.all(stockDeductionUpdates);
 
   const updateData = { customerName, items: menuItems, totalHarga, timestamp: Date.now() };
-  if (isDeliveryOrder !== undefined) updateData.isDeliveryOrder = isDeliveryOrder;
+  if (kasir !== undefined) updateData.kasir = kasir || 'rumah';
 
   const updatedOrder = await Order.findByIdAndUpdate(orderId, updateData, { new: true });
   return { updatedOrder, receiptText: generateReceiptData(updatedOrder) };
@@ -170,7 +169,7 @@ export const getOrderersByMenuId = async (menuId) => {
   const pendingOrders = await Order.find({
     status: 'Pending',
     'items.menuId': menuId,
-  }).select('customerName items timestamp isDeliveryOrder');
+  }).select('customerName items timestamp');
 
   const result = [];
   pendingOrders.forEach((order) => {
@@ -180,7 +179,6 @@ export const getOrderersByMenuId = async (menuId) => {
         customerName: order.customerName,
         quantity: item.quantity,
         notes: item.notes || '',
-        isDeliveryOrder: order.isDeliveryOrder,
         timestamp: order.timestamp,
         orderId: order._id,
       });

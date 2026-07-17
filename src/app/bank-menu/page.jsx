@@ -480,7 +480,7 @@ const MenuBankForm = ({ editData, onClose, onSaved }) => {
             <textarea
               value={form.deskripsi}
               onChange={(e) => setForm((p) => ({ ...p, deskripsi: e.target.value }))}
-              placeholder="cth: Pedas, cocok buat DO..."
+              placeholder="cth: Pedas, favorit anak-anak..."
               rows={2}
               className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-none"
             />

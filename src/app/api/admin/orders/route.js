@@ -7,7 +7,7 @@ export async function GET() {
   await connectDB();
   try {
     const ordersList = await Order.find()
-      .select('customerName totalHarga timestamp status isDeliveryOrder')
+      .select('customerName totalHarga timestamp status kasir')
       .sort({ timestamp: -1 });
     return NextResponse.json(ordersList);
   } catch (error) {
@@ -18,8 +18,8 @@ export async function GET() {
 export async function POST(request) {
   await connectDB();
   try {
-    const { customerName, items, isDeliveryOrder } = await request.json();
-    const { newOrder, receiptText } = await createNewOrder(customerName, items, isDeliveryOrder || false);
+    const { customerName, items, kasir } = await request.json();
+    const { newOrder, receiptText } = await createNewOrder(customerName, items, kasir);
     return NextResponse.json(
       { message: 'Pesanan berhasil dibuat!', orderId: newOrder._id, receipt: receiptText },
       { status: 201 }

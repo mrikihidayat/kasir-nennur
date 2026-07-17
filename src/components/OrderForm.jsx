@@ -2,11 +2,12 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { submitOrder, updateOrder, getOrderDetail } from '@/services/api';
 import Swal from 'sweetalert2';
-import { Search, ShoppingCart, Truck, X } from 'lucide-react';
+import { Search, ShoppingCart, X, Wallet } from 'lucide-react';
+import { KASIR_OPTIONS } from '@/lib/kasir';
 
 const OrderForm = ({ allMenus, onOrderProcessed, formatRupiah, editingOrderId, setEditingOrderId }) => {
   const [customerName, setCustomerName] = useState('');
-  const [isDeliveryOrder, setIsDeliveryOrder] = useState(false);
+  const [kasir, setKasir] = useState('rumah');
   const [quantities, setQuantities] = useState({});
   const [notes, setNotes] = useState({});
   const [isEditMode, setIsEditMode] = useState(false);
@@ -16,7 +17,7 @@ const OrderForm = ({ allMenus, onOrderProcessed, formatRupiah, editingOrderId, s
 
   const handleResetForm = useCallback(() => {
     setCustomerName('');
-    setIsDeliveryOrder(false);
+    setKasir('rumah');
     setQuantities({});
     setNotes({});
     setIsEditMode(false);
@@ -36,7 +37,7 @@ const OrderForm = ({ allMenus, onOrderProcessed, formatRupiah, editingOrderId, s
           const result = await getOrderDetail(editingOrderId);
           const o = result.order;
           setCustomerName(o.customerName || '');
-          setIsDeliveryOrder(o.isDeliveryOrder || false);
+          setKasir(o.kasir || 'rumah');
           const initialQty = {}, initialNotes = {};
           o.items.forEach((item) => {
             initialQty[item.menuId] = item.quantity === 0 ? '' : item.quantity.toString();
@@ -94,8 +95,8 @@ const OrderForm = ({ allMenus, onOrderProcessed, formatRupiah, editingOrderId, s
     }
 
     try {
-      if (isEditMode) await updateOrder(editingOrderId, { customerName, items, isDeliveryOrder });
-      else await submitOrder({ customerName, items, isDeliveryOrder });
+      if (isEditMode) await updateOrder(editingOrderId, { customerName, items, kasir });
+      else await submitOrder({ customerName, items, kasir });
 
       Swal.fire({
         icon: 'success',
@@ -133,17 +134,20 @@ const OrderForm = ({ allMenus, onOrderProcessed, formatRupiah, editingOrderId, s
         className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-400 focus:border-transparent"
       />
 
-      <label className="flex items-center gap-2.5 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={isDeliveryOrder}
-          onChange={(e) => setIsDeliveryOrder(e.target.checked)}
-          className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-        />
-        <span className="font-medium text-gray-700 flex items-center gap-1.5">
-          <Truck size={16} className="text-blue-500" /> Delivery Order (DO)
-        </span>
-      </label>
+      <div>
+        <label className="text-xs font-semibold text-gray-500 mb-1 flex items-center gap-1">
+          <Wallet size={13} /> Uang Masuk Ke
+        </label>
+        <select
+          value={kasir}
+          onChange={(e) => setKasir(e.target.value)}
+          className="w-full p-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-green-400 focus:border-transparent"
+        >
+          {KASIR_OPTIONS.map((k) => (
+            <option key={k.value} value={k.value}>{k.label}</option>
+          ))}
+        </select>
+      </div>
 
       <div className="border-t pt-3">
         <div className="flex items-center justify-between mb-2">

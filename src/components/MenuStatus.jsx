@@ -21,9 +21,6 @@ const MenuOrderersContent = ({ orderers, menuName }) => {
         <div key={i} className="flex items-start justify-between border-b pb-2 pt-1">
           <div>
             <p className="font-semibold text-gray-800 flex items-center gap-1">
-              {o.isDeliveryOrder && (
-                <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">DO</span>
-              )}
               {o.customerName}
             </p>
             {o.notes && <p className="text-xs italic text-red-600 ml-1 mt-0.5">📝 {o.notes}</p>}

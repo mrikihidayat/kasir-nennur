@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { getLaporanPenjualan } from '@/services/api';
 import Swal from 'sweetalert2';
 import { FileDown, Loader2 } from 'lucide-react';
+import { KASIR_LABEL } from '@/lib/kasir';
 
 const fmt = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n);
 const fmtDate = (s) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -19,7 +20,7 @@ function LaporanPDF() {
       const { jsPDF } = await import('jspdf');
       const { default: autoTable } = await import('jspdf-autotable');
       const data = await getLaporanPenjualan(today, today);
-      const { orders, grandTotal, totalTransaksi, menuRecap } = data;
+      const { orders, grandTotal, totalTransaksi, menuRecap, kasirRecap, kasirTotalSum, kasirCocokDenganGrandTotal } = data;
 
       if (!orders?.length) {
         Swal.fire({ icon: 'info', title: 'Tidak Ada Data', text: 'Belum ada pesanan hari ini.' });
@@ -77,6 +78,46 @@ function LaporanPDF() {
         });
 
         cursorY = doc.lastAutoTable.finalY + 6;
+      }
+
+      // --- Tabel 1b: Rekap Uang per Orang (5 kasir) ---
+      if (kasirRecap?.length) {
+        doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+        doc.text('REKAP UANG PER ORANG', 14, cursorY);
+        cursorY += 3;
+
+        autoTable(doc, {
+          startY: cursorY,
+          head: [['Nama', 'Total Uang']],
+          body: kasirRecap.map((k) => [
+            `Uang ${KASIR_LABEL[k.kasir] || k.kasir}`,
+            fmt(k.total),
+          ]),
+          styles: { fontSize: 7.5, cellPadding: 1.2, textColor: BLACK, lineColor: LIGHT_GRID, lineWidth: 0.1 },
+          headStyles: { fillColor: false, textColor: BLACK, fontStyle: 'bold', halign: 'center', lineColor: BLACK, lineWidth: 0.2 },
+          columnStyles: {
+            0: { cellWidth: 95 }, 1: { cellWidth: 95, halign: 'right' },
+          },
+          theme: 'grid',
+          foot: [[
+            { content: 'TOTAL SEMUA ORANG', styles: { fontStyle: 'bold', halign: 'right' } },
+            { content: fmt(kasirTotalSum), styles: { fontStyle: 'bold', halign: 'right' } },
+          ]],
+          footStyles: { fillColor: false, textColor: BLACK, fontSize: 8, lineColor: BLACK, lineWidth: 0.2 },
+          margin: { left: 10, right: 10 },
+        });
+
+        cursorY = doc.lastAutoTable.finalY + 4;
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...(kasirCocokDenganGrandTotal ? [0, 120, 0] : [180, 0, 0]));
+        doc.text(
+          kasirCocokDenganGrandTotal
+            ? `✓ Cocok dengan Grand Total (${fmt(grandTotal)})`
+            : `✗ TIDAK COCOK! Total per orang ${fmt(kasirTotalSum)} vs Grand Total ${fmt(grandTotal)}`,
+          14, cursorY
+        );
+        doc.setTextColor(...BLACK);
+        cursorY += 6;
       }
 
       // --- Tabel 2: Detail Transaksi ---
